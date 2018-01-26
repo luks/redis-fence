@@ -1,4 +1,4 @@
-PROG=simple-tcp-proxy
+PROG=redis-fence
 CFLAGS=-Wall
 
 all: ${PROG}

@@ -1,6 +1,3 @@
-/*
- * $Id: simple-tcp-proxy.c,v 1.11 2006/08/03 20:30:48 wessels Exp $
- */
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -11,7 +8,6 @@
 #include <assert.h>
 #include <syslog.h>
 #include <err.h>
-
 
 #include <sys/types.h>
 #include <sys/select.h>
@@ -31,11 +27,7 @@
 
 
 
-
-///#define BUF_SIZE 4096
 #define BUF_SIZE (1024*10)
-
-
 
 #define REDIS_STAR  "*"
 
@@ -45,39 +37,39 @@
 
 #define REDIS_LF  "\n"
 
-//move to header latter
+
+// move code bellow to request.h file
 
 #ifndef _REQUEST_H
 #define _REQUEST_H
 
 struct request{
-    char *querybuf;
+    char *rreqbuf;
     int argc;
     char **argv;
     size_t pos;
 };
 
-struct request *request_new(char *querybuf);
+struct request *new_request(char *rreqbuf);
 int  request_parse(struct request *request);
 void request_free(struct request *request);
 void request_dump(struct request *request);
 
 #endif
 
-// header
-// request methods
-
-
+// /request.h header
+// move code bellow to request.c file
 
 enum {
     STATE_CONTINUE,
     STATE_FAIL
 };
 
-struct request *request_new(char *querybuf) {
+
+struct request *new_request(char *rreqbuf) {
     struct request *req;
-    req=calloc(1, sizeof(struct request));
-    req->querybuf = querybuf;
+    req = calloc(1, sizeof(struct request));
+    req->rreqbuf = rreqbuf;
     return req;
 }
 
@@ -88,7 +80,7 @@ int req_state_len(struct request *req,char *sb) {
     int i = req->pos;
     int pos=i;
 
-    while((c = req->querybuf[i]) != '\0') {
+    while((c = req->rreqbuf[i]) != '\0') {
         first++;
         pos++;
         switch(c) {
@@ -105,15 +97,14 @@ int req_state_len(struct request *req,char *sb) {
                     return STATE_FAIL;
             default:
                 if (first == 1) {
-                    /* the first symbol is not '*' or '$'*/
                     if (c != *REDIS_DOLLAR && c != *REDIS_STAR && c != *REDIS_CR && c != *REDIS_LF)
                         return STATE_FAIL;
                 } else {
-                    /* the symbol must be numeral*/
-                    if (c >= '0' && c <= '9')
+                    if (c >= '0' && c <= '9') {
                         *sb++ = c;
-                    else
+                    } else {
                         return STATE_FAIL;
+                    }
                 }
                 break;
         }
@@ -132,9 +123,11 @@ int request_parse(struct request *req) {
         fprintf(stderr, "argc format ***ERROR***,packet:%s", sb);
         return 0;
     }
+
     req->argc = atoi(sb);
 
     req->argv  =(char**)calloc(req->argc, sizeof(char*));
+
     for (i = 0; i < req->argc; i++) {
         int argv_len;
         char *v;
@@ -147,9 +140,12 @@ int request_parse(struct request *req) {
         }
         argv_len=atoi(sb);
 
-        /*get argv*/
         v=(char*)malloc(sizeof(char) * argv_len);
-        memcpy(v, req->querybuf+(req->pos), argv_len);
+
+        memcpy(v, req->rreqbuf+(req->pos), argv_len);
+        //memcpy doesn't add null terminator at the end :) bug? !!!
+        v[argv_len] = '\0';
+
         req->argv[i] = v;
         req->pos += argv_len+2;
     }
@@ -161,7 +157,7 @@ void request_dump(struct request *req) {
     if (req == NULL)
         return;
 
-    printf("request-dump--->");
+    printf("redis-request-dump--->\n");
     printf("argc:<%d>\n", req->argc);
     for (i = 0; i < req->argc; i++) {
         printf("		argv[%d]:<%s>\n",i,req->argv[i]);
@@ -180,59 +176,35 @@ void request_free(struct request *req) {
         free(req);
     }
 }
-// end of request methods
+
+// end of request.c file
 
 void redis_command_from_buffer(char * cbuf, int n) {
 
-    int ret;
-    struct request *req=request_new(cbuf);
-    ret=request_parse(req);
-    if(ret) {
-//        request_dump(req);
-        printf("%s\n", req->argv[0]);
+    char keys[5];
+    char select[10] = "select";
 
+    strcpy(keys, "keys");
+    strcpy(select, "select");
+
+    int ret;
+    struct request *req = new_request(cbuf);
+    ret = request_parse(req);
+    if (ret) {
+        request_dump(req);
+        printf("Redis request function :<%s>\n", req->argv[0]);
+
+        if (strcmp(select, req->argv[0]) == 0) {
+            printf("comparation select\n");
+        }
+
+        if (strcmp(keys, req->argv[0]) == 0) {
+            printf("comparation keys\n");
+        }
     }
 
-//    if (n > 0)
-//    {
-//        printf("%s\n", cbuf);
-//
-//        int i;
-//        for (i = 0; i < n; ++i)
-//        {
-////            if (cbuf[0] == *REDIS_STAR) {
-////               i++;
-////            }
-//
-//            if (cbuf[i] == *REDIS_STAR) {
-//                i++;
-//            }
-//
-//            if (cbuf[i] == *REDIS_CR) {
-//                i++;
-//            }
-//
-//            if (cbuf[i] == *REDIS_LF) {
-//                i++;
-//            }
-//
-//            if (cbuf[i] == *REDIS_DOLLAR) {
-//                i++;
-//            }
-//            printf("%c\n", cbuf[i]);
-//        }
-//
-//    }
-
+    request_free(req);
 }
-
-
-// *2\r\n
-// $4\r\n
-// keys\r\n
-// $1\r\n
-// *\r\n
-
 
 
 
