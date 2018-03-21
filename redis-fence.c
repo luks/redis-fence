@@ -12,7 +12,8 @@
 
 enum {
     STATE_CONTINUE,
-    STATE_FAIL
+    STATE_FAIL,
+    ABORT
 };
 
 typedef struct r_cmd {
@@ -125,7 +126,7 @@ int cmd_parse_recursive(struct r_cmd *cmd, struct r_buffer *pBuff) {
 
     if (cmd_state_len(cmd, sb) != STATE_CONTINUE) {
         printf("\r\rargc format error:%s", sb);
-        return false;
+        return ABORT;
     }
     cmd->argc = (size_t) strtol(sb, &ptr, 0);
     cmd->argv  =(char**)calloc(cmd->argc, sizeof(char*));
@@ -136,7 +137,7 @@ int cmd_parse_recursive(struct r_cmd *cmd, struct r_buffer *pBuff) {
         memset(sb, 0, BUF_SIZE);
         if (cmd_state_len(cmd, sb) != STATE_CONTINUE) {
             printf("\r\rargv's length error, packet:%s", sb);
-            return false;
+            return ABORT;
         }
         argv_len = (size_t) strtol(sb, &ptr1, 0);
 
@@ -160,11 +161,13 @@ int cmd_parse_recursive(struct r_cmd *cmd, struct r_buffer *pBuff) {
 }
 
 
-void buffer_parse(struct r_buffer * buffer) {
+bool buffer_parse(struct r_buffer * buffer) {
 
     buffer->cmd = calloc(1, sizeof(struct r_cmd));
-    cmd_parse_recursive(buffer->cmd, buffer);
-
+    if(cmd_parse_recursive(buffer->cmd, buffer) == ABORT) {
+        return false;
+    }
+    return true;
 }
 
 void cmd_print(struct r_cmd *cmd) {
@@ -188,7 +191,11 @@ void cmd_log(struct r_cmd *cmd) {
 void test_parser(char * data) {
 
     struct r_buffer *buffer = buffer_new(data);
-    buffer_parse(buffer);
+    if(buffer_parse(buffer)) {
+        printf("OK");
+    } else {
+        printf("Abort request");
+    }
     cmd_print(buffer->cmd);
     printf("\r\n");
     printf("Buffer position: [%d]\n", (int) buffer->pos);
