@@ -33,19 +33,20 @@ typedef struct r_buff {
 void cmd_free(struct r_cmd *cmd);
 void cmd_print(struct r_cmd *n);
 void cmd_log(struct r_cmd *cmd);
-int cmd_state_len(struct r_cmd *req, char *sb);
-int cmd_parse(struct r_cmd *req, struct r_buff *pBuff);
+int cmd_state_len(struct r_cmd *cmd, char *sb);
+struct r_buff *buffer_new(char *buff);
+int cmd_parse(struct r_cmd *cmd, struct r_buff *pBuff);
 
 #endif
 
-int cmd_state_len(struct r_cmd *req, char *sb) {
+int cmd_state_len(struct r_cmd *cmd, char *sb) {
 
     int term = 0, first = 0;
     char c;
-    size_t i = req->pos;
+    size_t i = cmd->pos;
     size_t pos = i;
 
-    while((c = req->buff[i]) != '\0') {
+    while((c = cmd->buff[i]) != '\0') {
         first++;
         pos++;
         switch(c) {
@@ -54,7 +55,7 @@ int cmd_state_len(struct r_cmd *req, char *sb) {
                 break;
             case '\n':
                 if (term) {
-                    req->pos = pos;
+                    cmd->pos = pos;
                     return STATE_CONTINUE;
                 }
                 else
@@ -114,24 +115,24 @@ void cmd_free(struct r_cmd *cmd) {
     }
 }
 
-int cmd_parse(struct r_cmd *req, struct r_buff *pBuff) {
+int cmd_parse(struct r_cmd *cmd, struct r_buff *pBuff) {
 
     int i;
     char sb[BUF_SIZE] = {0};
     char *ptr, *ptr1;
 
-    if (cmd_state_len(req, sb) != STATE_CONTINUE) {
+    if (cmd_state_len(cmd, sb) != STATE_CONTINUE) {
         printf("\r\rargc format error:%s", sb);
         return false;
     }
-    req->argc = (size_t) strtol(sb, &ptr, 0);
-    req->argv  =(char**)calloc(req->argc, sizeof(char*));
+    cmd->argc = (size_t) strtol(sb, &ptr, 0);
+    cmd->argv  =(char**)calloc(cmd->argc, sizeof(char*));
 
-    for (i = 0; i < req->argc; i++) {
+    for (i = 0; i < cmd->argc; i++) {
         size_t argv_len;
         char *v;
         memset(sb, 0, BUF_SIZE);
-        if (cmd_state_len(req, sb) != STATE_CONTINUE) {
+        if (cmd_state_len(cmd, sb) != STATE_CONTINUE) {
             printf("\r\rargv's length error, packet:%s", sb);
             return false;
         }
@@ -139,49 +140,76 @@ int cmd_parse(struct r_cmd *req, struct r_buff *pBuff) {
 
         if (argv_len < BUF_SIZE) { //todo  <--- this is product of tirednes and stupidity FIX IT!!!!
             v = (char *) malloc(sizeof(char) * argv_len + 1);
-            memcpy(v, req->buff + (req->pos), argv_len);
+            memcpy(v, cmd->buff + (cmd->pos), argv_len);
             v[argv_len] = '\0';
-            req->argv[i] = v;
+            cmd->argv[i] = v;
         }
-        req->pos += argv_len + 2;
+        cmd->pos += argv_len + 2;
     }
 
-    pBuff->pos += req->pos;
+    pBuff->pos += cmd->pos;
     pBuff->cmd_cnt += 1;
 
     return (int) ((pBuff->buff + pBuff->pos)[0] == *REDIS_STAR ? STATE_CONTINUE : STATE_FAIL);
 }
 
+int cmd_parse_recursive(struct r_cmd *cmd, struct r_buff *pBuff) {
+
+    cmd->buff = pBuff->buff+pBuff->pos;
+
+    int i;
+    char sb[BUF_SIZE] = {0};
+    char *ptr, *ptr1;
+
+    if (cmd_state_len(cmd, sb) != STATE_CONTINUE) {
+        printf("\r\rargc format error:%s", sb);
+        return false;
+    }
+    cmd->argc = (size_t) strtol(sb, &ptr, 0);
+    cmd->argv  =(char**)calloc(cmd->argc, sizeof(char*));
+
+    for (i = 0; i < cmd->argc; i++) {
+        size_t argv_len;
+        char *v;
+        memset(sb, 0, BUF_SIZE);
+        if (cmd_state_len(cmd, sb) != STATE_CONTINUE) {
+            printf("\r\rargv's length error, packet:%s", sb);
+            return false;
+        }
+        argv_len = (size_t) strtol(sb, &ptr1, 0);
+
+        if (argv_len < BUF_SIZE) { //todo  <--- this is product of tirednes and stupidity FIX IT!!!!
+            v = (char *) malloc(sizeof(char) * argv_len + 1);
+            memcpy(v, cmd->buff + (cmd->pos), argv_len);
+            v[argv_len] = '\0';
+            cmd->argv[i] = v;
+        }
+        cmd->pos += argv_len + 2;
+    }
+
+    pBuff->pos += cmd->pos;
+    pBuff->cmd_cnt += 1;
+    if((pBuff->buff + pBuff->pos)[0] == *REDIS_STAR) {
+        struct r_cmd *tmp = cmd->next = calloc(1, sizeof(struct r_cmd));
+        cmd_parse_recursive(tmp, pBuff);
+    } else {
+        return STATE_FAIL;
+    }
+}
+
+
 void buffer_parse(struct r_buff * buffer) {
 
     buffer->cmd = calloc(1, sizeof(struct r_cmd));
-    buffer->cmd->buff = buffer->buff;
-
-    printf("Buffer continue?: [%d]\n", cmd_parse(buffer->cmd, buffer));
-
-    buffer->cmd->next = calloc(1, sizeof(struct r_cmd));
-    buffer->cmd->next->buff = buffer->buff+buffer->pos;
-
-    printf("Buffer continue?: [%d]\n", cmd_parse(buffer->cmd->next, buffer));
-
-    buffer->cmd->next->next = calloc(1, sizeof(struct r_cmd));
-    buffer->cmd->next->next->buff = buffer->buff+buffer->pos;
-
-    printf("Buffer continue?: [%d]\n", cmd_parse(buffer->cmd->next->next, buffer));
-
-    printf("Buffer position: [%d]\n", (int) buffer->pos);
-    printf("Commands count: [%d]\n", (int) buffer->cmd_cnt);
-
-    cmd_print(buffer->cmd);
-    buffer_free(buffer);
+    cmd_parse_recursive(buffer->cmd, buffer);
 
 }
 
-void cmd_print(struct r_cmd *n) {
-    while (n != NULL) {
+void cmd_print(struct r_cmd *cmd) {
+    while (cmd != NULL) {
         printf("------------------------------------");
-        cmd_log(n);
-        n = n->next;
+        cmd_log(cmd);
+        cmd = cmd->next;
     }
 }
 
@@ -197,12 +225,17 @@ void cmd_log(struct r_cmd *cmd) {
 
 int main(int argc, char *argv[]) {
 
-    char * data = "*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musis\r\n*3\r\n$4\r\ntegh\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n*3\r\n$4\r\ntttt\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n";
+//    char * data = "*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musis\r\n*3\r\n$4\r\ntegh\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n*3\r\n$4\r\ntttt\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n";
 //    char * data = "*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musin\r\n";
 
+    char * data = "*3\r\n$4\r\nsrem\r\n$28\r\ntarget:owner(luka.musin).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$18\r\ntarget:realm().idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$20\r\ntarget:tag(keks).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$20\r\ntarget:tag(poks).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$21\r\ntarget:hostname().idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$26\r\ntarget:template(false).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$10\r\ntarget.idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nhdel\r\n$6\r\ntarget\r\n$5\r\nkoloe\r\n*2\r\n$4\r\nincr\r\n$8\r\nrevision\r\n*1\r\n$4\r\nexec\r\n";
 
 
     struct r_buff *buffer = buffer_new(data);
     buffer_parse(buffer);
+    printf("Buffer position: [%d]\n", (int) buffer->pos);
+    printf("Commands count: [%d]\n", (int) buffer->cmd_cnt);
+    cmd_print(buffer->cmd);
+    buffer_free(buffer);
 
 }
