@@ -1,4 +1,4 @@
-PROG=redis-fence
+PROG=le-proxy
 CFLAGS=-Wall
 
 all: ${PROG}
