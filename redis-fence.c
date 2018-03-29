@@ -13,37 +13,27 @@
 #define REDIS_LF  "\n"
 
 enum {
-    STATE_START,
     STATE_CONTINUE,
     STATE_FAIL,
-    ABORT
 };
 
-typedef struct r_cmd {
+struct r_cmd {
     size_t pos;
     char *buff;
     size_t argc;
     char **argv;
     struct r_cmd *next;
-} r_cmd_t;
+};
 
-typedef struct r_buffer {
-    size_t pos;
-    size_t len;
-    size_t start;
-    char * tail;
+struct r_buffer {
     char *buff;
-    int cmd_cnt;
     struct r_cmd *cmd;
-} r_buff_t;
+};
 
-void cmd_free(struct r_cmd *cmd);
-void cmd_print(struct r_cmd *cmd);
+
 void cmd_log(struct r_cmd *cmd);
-int cmd_state_len(struct r_cmd *cmd, char *sb);
 struct r_buffer *buffer_new(char *buff);
-int cmd_parse_recursive(struct r_cmd *cmd, struct r_buffer *pBuff);
-bool buffer_parse(struct r_buffer * buffer);
+
 struct r_buffer *buffer_new(char *buff);
 void test_parser(char * data);
 void buffer_free(struct r_buffer *buffer);
@@ -67,104 +57,29 @@ void cmd_log(struct r_cmd *cmd) {
     }
 }
 
-int cmd_state_len(struct r_cmd *cmd, char *sb) {
-
-    int term = 0, first = 0;
-    char c;
-    size_t i = cmd->pos;
-    size_t pos = i;
-
-    while((c = cmd->buff[i]) != '\0') {
-        first++;
-        pos++;
-        switch(c) {
-            case '\r':
-                term = 1;
-                break;
-            case '\n':
-                if (term) {
-                    cmd->pos = pos;
-                    return STATE_CONTINUE;
-                }
-                else
-                    return STATE_FAIL;
-            default:
-                if (first == 1) {
-                    if (c != *REDIS_DOLLAR && c != *REDIS_STAR && c != *REDIS_CR && c != *REDIS_LF)
-                        return STATE_FAIL;
-                } else {
-                    if (c >= '0' && c <= '9') {
-                        *sb++ = c;
-                    } else {
-                        return STATE_FAIL;
-                    }
-                }
-                break;
-        }
-        i++;
-    }
-    return STATE_FAIL;
-}
-
-bool find_command(struct r_cmd *cmd) {
-
-    if((cmd->buff + cmd->pos) != NULL) {
-        if (cmd->buff[cmd->pos] == *REDIS_STAR) {
-            return true;
-        }
-    }
-    return false;
-}
-
-
-void cmd_free_all(struct r_cmd *cmd) {
-
-    while (cmd != NULL) {
-        struct r_cmd *tmp = cmd;
-        cmd = cmd->next;
-        cmd_free(tmp);
-
-    }
-}
 
 void buffer_free(struct r_buffer *buffer) {
 
-    cmd_free_all(buffer->cmd);
+    int i;
+    if (buffer->cmd) {
+        for (i = 0; i < buffer->cmd->argc; i++) {
+            if (buffer->cmd->argv[i])
+                free(buffer->cmd->argv[i]);
+        }
+        //free(buffer->cmd->argv);
+        free(buffer->cmd);
+    }
     free(buffer);
 }
-
-void cmd_free(struct r_cmd *cmd) {
-
-    int i;
-    if (cmd) {
-        for (i = 0; i < cmd->argc; i++) {
-            if (cmd->argv[i])
-                free(cmd->argv[i]);
-        }
-        free(cmd->argv);
-        free(cmd);
-    }
-}
-
-
 
 struct r_buffer *buffer_new(char *buff) {
 
     struct r_buffer *r_buff;
     r_buff = calloc(1, sizeof(struct r_buffer));
     r_buff->buff = buff;
-    r_buff->len = strlen(buff);
     return r_buff;
 }
 
-bool buffer_parse(struct r_buffer * buffer) {
-
-    buffer->cmd = calloc(1, sizeof(struct r_cmd));
-    if(cmd_parse_recursive(buffer->cmd, buffer) == ABORT) {
-        return false;
-    }
-    return true;
-}
 
 int state_machine(struct r_cmd *cmd, char *sb) {
 
@@ -233,7 +148,7 @@ int test_command(struct r_cmd *cmd) {
                 char *v;
                 memset(sb, 0, BUF_SIZE);
 
-                if (cmd_state_len(cmd, sb) != STATE_CONTINUE) {
+                if (state_machine(cmd, sb) != STATE_CONTINUE) {
                     continue;
                 }
                 argv_len = (size_t) strtol(sb, &ptr, 0);
