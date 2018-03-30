@@ -132,22 +132,22 @@ struct request *request_multiple_parse(char *data) {
     while((c = data[i]) != '\0') {
 
         if (c == REDIS_STAR) {
-
             printf("Star found at position [%d] ", i);
 
             *ppReq = calloc(1, sizeof(struct request));
             (*ppReq)->querybuf = &data[i];
 
             if(request_parse(*ppReq) != OK) {
-                printf("request not parsed.\n");
                 (*ppReq)->failed = 1;
+                printf("request not parsed.\n");
             } else {
                 printf("request parsed.\n");
-            };
+            }
             /* jump over bytes already consumed by request_parse... */
             if((*ppReq)->pos > 1) {
                 i += (int) (*ppReq)->pos - 1;
             }
+
             printf("Current parse position [%d]\n", i);
             ppReq = &(*ppReq)->next;
         }
