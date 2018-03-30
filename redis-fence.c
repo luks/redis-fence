@@ -39,18 +39,20 @@ enum {
 };
 
 struct request *request_new(char *querybuf) {
+
     struct request *req;
-    req=calloc(1, sizeof(struct request));
+    req = calloc(1, sizeof(struct request));
     req->querybuf = querybuf;
     return req;
 }
 
 
 int req_state_len(struct request *req,char *sb) {
-    int term=0, first=0;
+
+    int term = 0, first = 0;
     char c;
-    int i = req->pos;
-    int pos=i;
+    int i = (int) req->pos;
+    int pos = i;
 
     while((c = req->querybuf[i]) != '\0') {
         first++;
@@ -62,18 +64,17 @@ int req_state_len(struct request *req,char *sb) {
 
             case '\n':
                 if (term) {
-                    req->pos = pos;
+                    req->pos = (size_t) pos;
                     return STATE_CONTINUE;
                 }
                 else
                     return STATE_FAIL;
             default:
                 if (first == 1) {
-                    /* the first symbol is not '*' or '$'*/
-                    if (c != '$' && c != '*' && c != '\r' && c != '\n')
+                    if (c != '*' && c != '$')
                         return STATE_FAIL;
                 } else {
-                    /* the symbol must be numeral*/
+                    /* the symbol must be numeral */
                     if (c >= '0' && c <= '9')
                         *sb++ = c;
                     else
@@ -89,6 +90,7 @@ int req_state_len(struct request *req,char *sb) {
 
 
 int request_parse(struct request *req) {
+
     int i;
     char sb[BUF_SIZE] = {0};
 
@@ -98,24 +100,24 @@ int request_parse(struct request *req) {
     }
     req->argc = atoi(sb);
 
-    req->argv  =(char**)calloc(req->argc, sizeof(char*));
+    req->argv = (char**) calloc((size_t)req->argc, sizeof(char*));
     for (i = 0; i < req->argc; i++) {
         int argv_len;
         char *v;
 
-        /*parse argv len*/
+        /* parse argv len */
         memset(sb, 0, BUF_SIZE);
         if (req_state_len(req, sb) != STATE_CONTINUE) {
             fprintf(stderr, "argv's length format ***ERROR***, packet:%s\n", sb);
             return FAILED;
         }
-        argv_len=atoi(sb);
+        argv_len = atoi(sb);
 
-        /*get argv*/
-        v=(char*)malloc(sizeof(char) * argv_len);
+        /* get argv */
+        v = (char*) malloc(sizeof(char)* argv_len);
         memcpy(v, req->querybuf + (req->pos), argv_len);
         req->argv[i] = v;
-        req->pos += argv_len+2;
+        req->pos += argv_len + 2;
     }
     return OK;
 }
@@ -139,10 +141,10 @@ struct request *request_multiple_parse(char *data) {
             (*ppReq)->querybuf = &data[i];
 
             if(request_parse(*ppReq) != OK) {
-                printf("Error parse request at position [%d] \n", i);
+                printf("Error parse request at position [%d]\n", i);
                 (*ppReq)->failed = 1;
             };
-            /*jump over bytes already consumed by request_parse...*/
+            /* jump over bytes already consumed by request_parse... */
             if((*ppReq)->pos > 1) {
                 i += (int) (*ppReq)->pos - 1;
             }
@@ -152,9 +154,9 @@ struct request *request_multiple_parse(char *data) {
         printf("Current position [%d]\n", i);
         i++;
     }
-    /*terminate linked list's last node*/
+    /* terminate linked list's last node */
     *ppReq = NULL;
-    /*return linked list root*/
+    /* return linked list root */
     return root;
 }
 
@@ -181,8 +183,6 @@ void request_dump(struct request *req) {
         return;
 
     printf("request-dump--->");
-    //printf("request-tail--->[%s]", req->querybuf);
-
     if(req->failed) {
 
         printf("request-failed--->");
@@ -192,7 +192,7 @@ void request_dump(struct request *req) {
 
         printf("argc:<%d>\n", req->argc);
         for (i = 0; i < req->argc; i++) {
-            //printf("argv[%d]:<%s>\n", i, req->argv[i]);
+            printf("argv[%d]:<%s>\n", i, req->argv[i]);
         }
     }
     printf("\n");
@@ -218,21 +218,17 @@ void test_parser(char * data) {
 
     struct request *root = request_multiple_parse(data);
 
-    //print_requests(root);
+    print_requests(root);
 
 
-
-    printf("lalalala\n" );
-
-
-    while (root) {
-        if(root->failed == 0) {
-            printf("Method: [%s]\n", root->argv[0]);
-        } else {
-            printf("Failed: [%s]\n", root->querybuf);
-        }
-        root = root->next;
-    }
+//    while (root) {
+//        if(root->failed == 0) {
+//            printf("Method: [%s]\n", root->argv[0]);
+//        } else {
+//            printf("Failed: [%s]\n", root->querybuf);
+//        }
+//        root = root->next;
+//    }
 
     free_requests(root);
 
