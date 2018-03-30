@@ -14,6 +14,13 @@ struct command {
     struct command *next;
 };
 
+struct redis {
+    size_t count;
+    struct command *root;
+    char *tail;
+    size_t failed;
+};
+
 int  command_parse(struct command *cmd);
 void command_free(struct command *cmd);
 void command_dump(struct command *cmd);
