@@ -2,27 +2,26 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifndef _REQUEST_H
-#define _REQUEST_H
+#ifndef _command_H
+#define _command_H
 
-struct request {
+struct command {
     char *querybuf;
     int argc;
     char **argv;
     size_t pos;
     size_t failed;
-    struct request *next;
+    struct command *next;
 };
 
-struct request *request_new(char *querybuf);
-int  request_parse(struct request *request);
-void request_free(struct request *request);
-void request_dump(struct request *request);
-void print_requests(struct request * root);
-void free_requests(struct request * root);
+int  command_parse(struct command *command);
+void command_free(struct command *command);
+void command_dump(struct command *command);
+void print_commands(struct command * root);
+void free_commands(struct command * root);
+struct command *request_parse(char *reqbuff);
 
 #endif
-
 
 #define BUF_SIZE (1024*10)
 
@@ -38,16 +37,7 @@ enum {
     FAILED
 };
 
-struct request *request_new(char *querybuf) {
-
-    struct request *req;
-    req = calloc(1, sizeof(struct request));
-    req->querybuf = querybuf;
-    return req;
-}
-
-
-int req_state_len(struct request *req,char *sb) {
+int req_state_len(struct command *req,char *sb) {
 
     int term = 0, first = 0;
     char c;
@@ -89,7 +79,7 @@ int req_state_len(struct request *req,char *sb) {
 }
 
 
-int request_parse(struct request *req) {
+int command_parse(struct command *req) {
 
     int i;
     char sb[BUF_SIZE] = {0};
@@ -125,27 +115,26 @@ int request_parse(struct request *req) {
 }
 
 
-struct request *request_multiple_parse(char *data) {
+struct command *request_parse(char *request) {
 
     int i = 0;
     char c;
-    struct request *root = NULL, **ppReq = &root;
+    struct command *root = NULL, **ppReq = &root;
 
-    while((c = data[i]) != '\0') {
+    while((c = request[i]) != '\0') {
 
         if (c == REDIS_STAR) {
             printf("Star found at position [%d]\n", i);
 
-            *ppReq = calloc(1, sizeof(struct request));
-            (*ppReq)->querybuf = &data[i];
+            *ppReq = calloc(1, sizeof(struct command));
+            (*ppReq)->querybuf = &request[i];
 
-            if(request_parse(*ppReq) != OK)
+            if(command_parse(*ppReq) != OK)
                 (*ppReq)->failed = 1;
 
-            /* jump over bytes already consumed by request_parse... */
-            if((*ppReq)->pos > 1) {
+            /* jump over bytes already consumed by command_parse... */
+            if((*ppReq)->pos > 1)
                 i += (int) (*ppReq)->pos - 1;
-            }
 
             printf("Current parse position [%d]\n", i);
             ppReq = &(*ppReq)->next;
@@ -158,33 +147,33 @@ struct request *request_multiple_parse(char *data) {
     return root;
 }
 
-void print_requests(struct request * root) {
-    struct request *ptr = root;
+void print_commands(struct command * root) {
+    struct command *ptr = root;
     while (ptr) {
-        request_dump(ptr);
+        command_dump(ptr);
         ptr = ptr->next;
     }
 }
 
-void free_requests(struct request * root) {
-    struct request *ptr = root;
+void free_commands(struct command * root) {
+    struct command *ptr = root;
     while (ptr) {
-        struct request *tmp = ptr;
+        struct command *tmp = ptr;
         ptr = ptr->next;
-        request_free(tmp);
+        command_free(tmp);
     }
 }
 
-void request_dump(struct request *req) {
+void command_dump(struct command *req) {
     int i;
     if (req == NULL)
         return;
 
-    printf("request-dump--->");
+    printf("command-dump--->");
     if(req->failed) {
 
-        printf("request-failed--->");
-        printf("request-tail--->[%s]\n", req->querybuf);
+        printf("command-failed--->");
+        printf("command-tail--->[%s]\n", req->querybuf);
 
     } else {
 
@@ -196,7 +185,7 @@ void request_dump(struct request *req) {
     printf("\n");
 }
 
-void request_free(struct request *req) {
+void command_free(struct command *req) {
     int i;
     if (req) {
         for (i = 0; i < req->argc; i++) {
@@ -210,33 +199,14 @@ void request_free(struct request *req) {
 
 
 void test_parser(char * data) {
-    //struct request *buffer = request_new(data);
-    //request_dump(buffer);
-    //request_free(buffer);
 
-    struct request *root = request_multiple_parse(data);
-
-    //print_requests(root);
-
-
-//    while (root) {
-//        if(root->failed == 0) {
-//            printf("Method: [%s]\n", root->argv[0]);
-//        } else {
-//            printf("Failed: [%s]\n", root->querybuf);
-//        }
-//        root = root->next;
-//    }
-
-    free_requests(root);
-
-
+    struct command *root = request_parse(data);
+    print_commands(root);
+    free_commands(root);
 }
 
 
 int main(int argc, char *argv[]) {
-
-
 
     test_parser("*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musis\r\n*3\r\n$4\r\ntegh\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n*3\r\n$4\r\ntttt\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n");
     test_parser("*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musin\r\n");
@@ -249,12 +219,7 @@ int main(int argc, char *argv[]) {
     test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
     test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
     test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeyl\r\n");
-
-
     test_parser("*2\r\n$4\r\nkeys");
-
-
-
-
+    test_parser("2\r\n$4\r\nkeys\r\n$1\r\n\r\n2\r\n$4\r\nkeys\r\n$1\r\n\r\n2\r\n$4\r\nkeyl\r\n");
 
 }
