@@ -14,12 +14,12 @@ struct command {
     struct command *next;
 };
 
-int  command_parse(struct command *command);
-void command_free(struct command *command);
-void command_dump(struct command *command);
-void print_commands(struct command * root);
-void free_commands(struct command * root);
-struct command *request_parse(char *reqbuff);
+int  command_parse(struct command *cmd);
+void command_free(struct command *cmd);
+void command_dump(struct command *cmd);
+void print_commands(struct command *root);
+void free_commands(struct command *root);
+struct command *request_parse(char *req_data);
 
 #endif
 
@@ -37,14 +37,14 @@ enum {
     FAILED
 };
 
-int req_state_len(struct command *req,char *sb) {
+int req_state_len(struct command *cmd, char *sb) {
 
     int term = 0, first = 0;
     char c;
-    int i = (int) req->pos;
+    int i = (int) cmd->pos;
     int pos = i;
 
-    while((c = req->querybuf[i]) != '\0') {
+    while((c = cmd->querybuf[i]) != '\0') {
         first++;
         pos++;
         switch(c) {
@@ -54,7 +54,7 @@ int req_state_len(struct command *req,char *sb) {
 
             case '\n':
                 if (term) {
-                    req->pos = (size_t) pos;
+                    cmd->pos = (size_t) pos;
                     return STATE_CONTINUE;
                 }
                 else
@@ -79,27 +79,25 @@ int req_state_len(struct command *req,char *sb) {
 }
 
 
-int command_parse(struct command *req) {
+int command_parse(struct command *cmd) {
 
     int i;
     char sb[BUF_SIZE] = {0};
 
-    if (req_state_len(req, sb) != STATE_CONTINUE) {
-        //fprintf(stderr, "argc format ***ERROR***,packet:%s\n", sb);
+    if (req_state_len(cmd, sb) != STATE_CONTINUE) {
         printf("argc format ***ERROR***,packet:%s\n", sb);
         return FAILED;
     }
-    req->argc = atoi(sb);
+    cmd->argc = atoi(sb);
 
-    req->argv = (char**) calloc((size_t)req->argc, sizeof(char*));
-    for (i = 0; i < req->argc; i++) {
+    cmd->argv = (char**) calloc((size_t)cmd->argc, sizeof(char*));
+    for (i = 0; i < cmd->argc; i++) {
         int argv_len;
         char *v;
 
         /* parse argv len */
         memset(sb, 0, BUF_SIZE);
-        if (req_state_len(req, sb) != STATE_CONTINUE) {
-            //fprintf(stderr, "argv's length format ***ERROR***, packet:%s\n", sb);
+        if (req_state_len(cmd, sb) != STATE_CONTINUE) {
             printf("argv's length format ***ERROR***, packet:%s\n", sb);
             return FAILED;
         }
@@ -107,42 +105,42 @@ int command_parse(struct command *req) {
 
         /* get argv */
         v = (char*) malloc(sizeof(char)* argv_len);
-        memcpy(v, req->querybuf + (req->pos), argv_len);
-        req->argv[i] = v;
-        req->pos += argv_len + 2;
+        memcpy(v, cmd->querybuf + (cmd->pos), argv_len);
+        cmd->argv[i] = v;
+        cmd->pos += argv_len + 2;
     }
     return OK;
 }
 
 
-struct command *request_parse(char *request) {
+struct command *request_parse(char *req_data) {
 
     int i = 0;
     char c;
-    struct command *root = NULL, **ppReq = &root;
+    struct command *root = NULL, **ppCmd = &root;
 
-    while((c = request[i]) != '\0') {
+    while((c = req_data[i]) != '\0') {
 
         if (c == REDIS_STAR) {
             printf("Star found at position [%d]\n", i);
 
-            *ppReq = calloc(1, sizeof(struct command));
-            (*ppReq)->querybuf = &request[i];
+            *ppCmd = calloc(1, sizeof(struct command));
+            (*ppCmd)->querybuf = &req_data[i];
 
-            if(command_parse(*ppReq) != OK)
-                (*ppReq)->failed = 1;
+            if(command_parse(*ppCmd) != OK)
+                (*ppCmd)->failed = 1;
 
             /* jump over bytes already consumed by command_parse... */
-            if((*ppReq)->pos > 1)
-                i += (int) (*ppReq)->pos - 1;
+            if((*ppCmd)->pos > 1)
+                i += (int) (*ppCmd)->pos - 1;
 
             printf("Current parse position [%d]\n", i);
-            ppReq = &(*ppReq)->next;
+            ppCmd = &(*ppCmd)->next;
         }
         i++;
     }
     /* terminate linked list's last node */
-    *ppReq = NULL;
+    *ppCmd = NULL;
     /* return linked list root */
     return root;
 }
@@ -164,41 +162,41 @@ void free_commands(struct command * root) {
     }
 }
 
-void command_dump(struct command *req) {
+void command_dump(struct command *cmd) {
     int i;
-    if (req == NULL)
+    if (cmd == NULL)
         return;
 
     printf("command-dump--->");
-    if(req->failed) {
+    if(cmd->failed) {
 
         printf("command-failed--->");
-        printf("command-tail--->[%s]\n", req->querybuf);
+        printf("command-tail--->[%s]\n", cmd->querybuf);
 
     } else {
 
-        printf("argc:<%d>\n", req->argc);
-        for (i = 0; i < req->argc; i++) {
-            printf("argv[%d]:<%s>\n", i, req->argv[i]);
+        printf("argc:<%d>\n", cmd->argc);
+        for (i = 0; i < cmd->argc; i++) {
+            printf("argv[%d]:<%s>\n", i, cmd->argv[i]);
         }
     }
     printf("\n");
 }
 
-void command_free(struct command *req) {
+void command_free(struct command *cmd) {
     int i;
-    if (req) {
-        for (i = 0; i < req->argc; i++) {
-            if (req->argv[i])
-                free(req->argv[i]);
+    if (cmd) {
+        for (i = 0; i < cmd->argc; i++) {
+            if (cmd->argv[i])
+                free(cmd->argv[i]);
         }
-        free(req->argv);
-        free(req);
+        free(cmd->argv);
+        free(cmd);
     }
 }
 
 
-void test_parser(char * data) {
+void test_parser(char *data) {
 
     struct command *root = request_parse(data);
     print_commands(root);
