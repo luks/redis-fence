@@ -141,7 +141,7 @@ struct command *request_parse(char *req_data) {
     }
     /* terminate linked list's last node */
     *ppCmd = NULL;
-    /* return linked list root */
+    /* return linked list's root */
     return root;
 }
 
