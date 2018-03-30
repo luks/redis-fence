@@ -127,31 +127,30 @@ struct request *request_multiple_parse(char *data) {
 
     int i = 0;
     char c;
-
     struct request *root = NULL, **ppReq = &root;
 
     while((c = data[i]) != '\0') {
 
         if (c == REDIS_STAR) {
 
-            printf("Star found at position [%d]\n", i);
+            printf("Star found at position [%d] ", i);
 
             *ppReq = calloc(1, sizeof(struct request));
-
             (*ppReq)->querybuf = &data[i];
 
             if(request_parse(*ppReq) != OK) {
-                printf("Error parse request at position [%d]\n", i);
+                printf("request not parsed.\n");
                 (*ppReq)->failed = 1;
+            } else {
+                printf("request parsed.\n");
             };
             /* jump over bytes already consumed by request_parse... */
             if((*ppReq)->pos > 1) {
                 i += (int) (*ppReq)->pos - 1;
             }
+            printf("Current parse position [%d]\n", i);
             ppReq = &(*ppReq)->next;
-
         }
-        printf("Current position [%d]\n", i);
         i++;
     }
     /* terminate linked list's last node */
@@ -218,7 +217,7 @@ void test_parser(char * data) {
 
     struct request *root = request_multiple_parse(data);
 
-    print_requests(root);
+    //print_requests(root);
 
 
 //    while (root) {
@@ -251,6 +250,9 @@ int main(int argc, char *argv[]) {
     test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
     test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
     test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeyl\r\n");
+
+
+    test_parser("*2\r\n$4\r\nkeys");
 
 
 
