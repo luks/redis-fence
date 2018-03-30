@@ -95,7 +95,8 @@ int request_parse(struct request *req) {
     char sb[BUF_SIZE] = {0};
 
     if (req_state_len(req, sb) != STATE_CONTINUE) {
-        fprintf(stderr, "argc format ***ERROR***,packet:%s\n", sb);
+        //fprintf(stderr, "argc format ***ERROR***,packet:%s\n", sb);
+        printf("argc format ***ERROR***,packet:%s\n", sb);
         return FAILED;
     }
     req->argc = atoi(sb);
@@ -108,7 +109,8 @@ int request_parse(struct request *req) {
         /* parse argv len */
         memset(sb, 0, BUF_SIZE);
         if (req_state_len(req, sb) != STATE_CONTINUE) {
-            fprintf(stderr, "argv's length format ***ERROR***, packet:%s\n", sb);
+            //fprintf(stderr, "argv's length format ***ERROR***, packet:%s\n", sb);
+            printf("argv's length format ***ERROR***, packet:%s\n", sb);
             return FAILED;
         }
         argv_len = atoi(sb);
@@ -132,17 +134,14 @@ struct request *request_multiple_parse(char *data) {
     while((c = data[i]) != '\0') {
 
         if (c == REDIS_STAR) {
-            printf("Star found at position [%d] ", i);
+            printf("Star found at position [%d]\n", i);
 
             *ppReq = calloc(1, sizeof(struct request));
             (*ppReq)->querybuf = &data[i];
 
-            if(request_parse(*ppReq) != OK) {
+            if(request_parse(*ppReq) != OK)
                 (*ppReq)->failed = 1;
-                printf("request not parsed.\n");
-            } else {
-                printf("request parsed.\n");
-            }
+
             /* jump over bytes already consumed by request_parse... */
             if((*ppReq)->pos > 1) {
                 i += (int) (*ppReq)->pos - 1;
