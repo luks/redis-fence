@@ -1,252 +1,261 @@
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
-#include <stdbool.h>
+
 #ifndef _REQUEST_H
 #define _REQUEST_H
-#define BUF_SIZE (1024*16)
-#define REDIS_STAR  "*"
-#define REDIS_DOLLAR  "$"
-#define REDIS_CR  "\r"
-#define REDIS_LF  "\n"
 
-enum {
-    STATE_START,
-    STATE_CONTINUE,
-    STATE_FAIL,
-    ABORT
+struct request {
+    char *querybuf;
+    int argc;
+    char **argv;
+    size_t pos;
+    size_t failed;
+    struct request *next;
 };
 
-typedef struct r_cmd {
-    size_t pos;
-    char *buff;
-    size_t argc;
-    char **argv;
-    struct r_cmd *next;
-} r_cmd_t;
+struct request *request_new(char *querybuf);
+int  request_parse(struct request *request);
+void request_free(struct request *request);
+void request_dump(struct request *request);
+void print_requests(struct request * root);
+void free_requests(struct request * root);
 
-typedef struct r_buffer {
-    size_t pos;
-    size_t len;
-    size_t start;
-    char * tail;
-    char *buff;
-    int cmd_cnt;
-    struct r_cmd *cmd;
-} r_buff_t;
-
-void cmd_free(struct r_cmd *cmd);
-void cmd_print(struct r_cmd *cmd);
-void cmd_log(struct r_cmd *cmd);
-int cmd_state_len(struct r_cmd *cmd, char *sb);
-struct r_buffer *buffer_new(char *buff);
-int cmd_parse_recursive(struct r_cmd *cmd, struct r_buffer *pBuff);
-bool buffer_parse(struct r_buffer * buffer);
-struct r_buffer *buffer_new(char *buff);
-void test_parser(char * data);
-void buffer_free(struct r_buffer *buffer);
 #endif
 
-void cmd_print(struct r_cmd *cmd) {
-    while (cmd != NULL) {
-        printf("\r\n");
-        cmd_log(cmd);
-        cmd = cmd->next;
-    }
+
+#define BUF_SIZE (1024*10)
+
+#define REDIS_STAR '*'
+
+enum {
+    STATE_CONTINUE,
+    STATE_FAIL
+};
+
+enum {
+    OK,
+    FAILED
+};
+
+struct request *request_new(char *querybuf) {
+
+    struct request *req;
+    req = calloc(1, sizeof(struct request));
+    req->querybuf = querybuf;
+    return req;
 }
 
-void cmd_log(struct r_cmd *cmd) {
-    int i;
-    if (cmd == NULL)
-        return;
-    printf("\nargc:<%d>\n", (int) cmd->argc);
-    for (i = 0; i < cmd->argc; i++) {
-        printf("\nargv[%d]:<%s>\n",i,cmd->argv[i]);
-    }
-}
 
-void test_parser(char * data) {
-
-    struct r_buffer *buffer = buffer_new(data);
-//    if(buffer_parse(buffer)) {
-//        printf("OK");
-//    } else {
-//        printf("Abort request");
-//    }
-    buffer_parse(buffer);
-    cmd_print(buffer->cmd);
-    printf("\r\n");
-    printf("\nBuffer position: [%d]\n", (int) buffer->pos);
-    printf("\nRedis start: [%d]\n", (int) buffer->start);
-    printf("\nRedis tail: [%s]\n",  buffer->tail);
-    printf("\nCommands count: [%d]\n", (int) buffer->cmd_cnt);
-    printf("_____________________________________________________\n");
-    buffer_free(buffer);
-}
-
-int cmd_state_len(struct r_cmd *cmd, char *sb) {
+int req_state_len(struct request *req,char *sb) {
 
     int term = 0, first = 0;
     char c;
-    size_t i = cmd->pos;
-    size_t pos = i;
+    int i = (int) req->pos;
+    int pos = i;
 
-    while((c = cmd->buff[i]) != '\0') {
+    while((c = req->querybuf[i]) != '\0') {
         first++;
         pos++;
         switch(c) {
             case '\r':
                 term = 1;
                 break;
+
             case '\n':
                 if (term) {
-                    cmd->pos = pos;
+                    req->pos = (size_t) pos;
                     return STATE_CONTINUE;
                 }
                 else
                     return STATE_FAIL;
             default:
                 if (first == 1) {
-                    if (c != *REDIS_DOLLAR && c != *REDIS_STAR && c != *REDIS_CR && c != *REDIS_LF)
+                    if (c != '*' && c != '$')
                         return STATE_FAIL;
                 } else {
-                    if (c >= '0' && c <= '9') {
+                    /* the symbol must be numeral */
+                    if (c >= '0' && c <= '9')
                         *sb++ = c;
-                    } else {
+                    else
                         return STATE_FAIL;
-                    }
                 }
                 break;
         }
         i++;
     }
+
     return STATE_FAIL;
 }
 
-bool find_command(struct r_cmd *cmd) {
 
-    if(cmd->buff[cmd->pos] == *REDIS_STAR) {
-        return true;
-    }
-    return false;
-}
-
-
-void cmd_free_all(struct r_cmd *cmd) {
-
-    while (cmd != NULL) {
-        struct r_cmd *tmp = cmd;
-        cmd = cmd->next;
-        cmd_free(tmp);
-
-    }
-}
-
-void buffer_free(struct r_buffer *buffer) {
-
-    cmd_free_all(buffer->cmd);
-    free(buffer);
-}
-
-void cmd_free(struct r_cmd *cmd) {
-
-    int i;
-    if (cmd) {
-        for (i = 0; i < cmd->argc; i++) {
-            if (cmd->argv[i])
-                free(cmd->argv[i]);
-        }
-        free(cmd->argv);
-        free(cmd);
-    }
-}
-
-int cmd_parse_recursive(struct r_cmd *cmd, struct r_buffer *pBuff) {
-
-    cmd->buff = pBuff->buff + pBuff->pos;
+int request_parse(struct request *req) {
 
     int i;
     char sb[BUF_SIZE] = {0};
-    char *ptr, *ptr1;
 
-    if(!find_command(cmd)) {
-
-        while(cmd->pos < pBuff->len) {
-            cmd->pos++;
-            if (find_command(cmd)) {
-                pBuff->start = cmd->pos;
-                if (cmd_state_len(cmd, sb) == STATE_CONTINUE) {
-                    break;
-                }
-            }
-        }
-    } else {
-        cmd_state_len(cmd, sb);
+    if (req_state_len(req, sb) != STATE_CONTINUE) {
+        fprintf(stderr, "argc format ***ERROR***,packet:%s\n", sb);
+        return FAILED;
     }
+    req->argc = atoi(sb);
 
-    cmd->argc = (size_t) strtol(sb, &ptr, 0);
-    cmd->argv  =(char**)calloc(cmd->argc, sizeof(char*));
-    bool parse_failed = false;
-    for (i = 0; i < cmd->argc; i++) {
-        size_t argv_len;
+    req->argv = (char**) calloc((size_t)req->argc, sizeof(char*));
+    for (i = 0; i < req->argc; i++) {
+        int argv_len;
         char *v;
+
+        /* parse argv len */
         memset(sb, 0, BUF_SIZE);
-
-        if (cmd_state_len(cmd, sb) != STATE_CONTINUE) {
-            pBuff->tail = cmd->buff;
-            parse_failed = true;
-            continue;
+        if (req_state_len(req, sb) != STATE_CONTINUE) {
+            fprintf(stderr, "argv's length format ***ERROR***, packet:%s\n", sb);
+            return FAILED;
         }
-        argv_len = (size_t) strtol(sb, &ptr1, 0);
+        argv_len = atoi(sb);
 
-        v = (char *) malloc(sizeof(char) * argv_len + 1);
-        memcpy(v, cmd->buff + (cmd->pos), argv_len);
-        v[argv_len] = '\0';
-
-        cmd->argv[i] = v;
-        cmd->pos += argv_len + 2;
+        /* get argv */
+        v = (char*) malloc(sizeof(char)* argv_len);
+        memcpy(v, req->querybuf + (req->pos), argv_len);
+        req->argv[i] = v;
+        req->pos += argv_len + 2;
     }
+    return OK;
+}
 
-    pBuff->pos += cmd->pos;
-    if(!parse_failed) {
-        pBuff->cmd_cnt += 1;
+
+struct request *request_multiple_parse(char *data) {
+
+    int i = 0;
+    char c;
+    struct request *root = NULL, **ppReq = &root;
+
+    while((c = data[i]) != '\0') {
+
+        if (c == REDIS_STAR) {
+
+            printf("Star found at position [%d] ", i);
+
+            *ppReq = calloc(1, sizeof(struct request));
+            (*ppReq)->querybuf = &data[i];
+
+            if(request_parse(*ppReq) != OK) {
+                printf("request not parsed.\n");
+                (*ppReq)->failed = 1;
+            } else {
+                printf("request parsed.\n");
+            };
+            /* jump over bytes already consumed by request_parse... */
+            if((*ppReq)->pos > 1) {
+                i += (int) (*ppReq)->pos - 1;
+            }
+            printf("Current parse position [%d]\n", i);
+            ppReq = &(*ppReq)->next;
+        }
+        i++;
     }
+    /* terminate linked list's last node */
+    *ppReq = NULL;
+    /* return linked list root */
+    return root;
+}
 
-    if((pBuff->buff + pBuff->pos)[0] == *REDIS_STAR) {
-        struct r_cmd *tmp = cmd->next = calloc(1, sizeof(struct r_cmd));
-        cmd_parse_recursive(tmp, pBuff);
+void print_requests(struct request * root) {
+    struct request *ptr = root;
+    while (ptr) {
+        request_dump(ptr);
+        ptr = ptr->next;
     }
 }
 
-struct r_buffer *buffer_new(char *buff) {
-
-    struct r_buffer *r_buff;
-    r_buff = calloc(1, sizeof(struct r_buffer));
-    r_buff->buff = buff;
-    r_buff->len = strlen(buff);
-    return r_buff;
-}
-
-bool buffer_parse(struct r_buffer * buffer) {
-
-    buffer->cmd = calloc(1, sizeof(struct r_cmd));
-    if(cmd_parse_recursive(buffer->cmd, buffer) == ABORT) {
-        return false;
+void free_requests(struct request * root) {
+    struct request *ptr = root;
+    while (ptr) {
+        struct request *tmp = ptr;
+        ptr = ptr->next;
+        request_free(tmp);
     }
-    return true;
 }
+
+void request_dump(struct request *req) {
+    int i;
+    if (req == NULL)
+        return;
+
+    printf("request-dump--->");
+    if(req->failed) {
+
+        printf("request-failed--->");
+        printf("request-tail--->[%s]\n", req->querybuf);
+
+    } else {
+
+        printf("argc:<%d>\n", req->argc);
+        for (i = 0; i < req->argc; i++) {
+            printf("argv[%d]:<%s>\n", i, req->argv[i]);
+        }
+    }
+    printf("\n");
+}
+
+void request_free(struct request *req) {
+    int i;
+    if (req) {
+        for (i = 0; i < req->argc; i++) {
+            if (req->argv[i])
+                free(req->argv[i]);
+        }
+        free(req->argv);
+        free(req);
+    }
+}
+
+
+void test_parser(char * data) {
+    //struct request *buffer = request_new(data);
+    //request_dump(buffer);
+    //request_free(buffer);
+
+    struct request *root = request_multiple_parse(data);
+
+    //print_requests(root);
+
+
+//    while (root) {
+//        if(root->failed == 0) {
+//            printf("Method: [%s]\n", root->argv[0]);
+//        } else {
+//            printf("Failed: [%s]\n", root->querybuf);
+//        }
+//        root = root->next;
+//    }
+
+    free_requests(root);
+
+
+}
+
 
 int main(int argc, char *argv[]) {
-//    test_parser("*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musis\r\n*3\r\n$4\r\ntegh\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n*3\r\n$4\r\ntttt\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n");
-//    test_parser("*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musin\r\n");
-//    test_parser("*3\r\n$4\r\nsrem\r\n$28\r\ntarget:owner(luka.musin).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$18\r\ntarget:realm().idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$20\r\ntarget:tag(keks).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$20\r\ntarget:tag(poks).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$21\r\ntarget:hostname().idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$26\r\ntarget:template(false).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$10\r\ntarget.idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nhdel\r\n$6\r\ntarget\r\n$5\r\nkoloe\r\n*2\r\n$4\r\nincr\r\n$8\r\nrevision\r\n*1\r\n$4\r\nexec\r\n");
-//    test_parser("*3\r\n$11\r\nsinterstore\r\n$29\r\ntmp_sinterstore@1521640901:94\r\n$10\r\ntarget.idx\r\n");
-//    test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
+
+
+
+    test_parser("*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musis\r\n*3\r\n$4\r\ntegh\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n*3\r\n$4\r\ntttt\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n");
+    test_parser("*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musin\r\n");
+    test_parser("*3\r\n$4\r\nsrem\r\n$28\r\ntarget:owner(luka.musin).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$18\r\ntarget:realm().idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$20\r\ntarget:tag(keks).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$20\r\ntarget:tag(poks).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$21\r\ntarget:hostname().idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$26\r\ntarget:template(false).idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nsrem\r\n$10\r\ntarget.idx\r\n$5\r\nkoloe\r\n*3\r\n$4\r\nhdel\r\n$6\r\ntarget\r\n$5\r\nkoloe\r\n*2\r\n$4\r\nincr\r\n$8\r\nrevision\r\n*1\r\n$4\r\nexec\r\n");
+    test_parser("*3\r\n$11\r\nsinterstore\r\n$29\r\ntmp_sinterstore@1521640901:94\r\n$10\r\ntarget.idx\r\n");
+    test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
     test_parser("*2\r\n$4720\r\ndasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\r\n$1\r\n*\r\n");
     test_parser("*2\r\n$4\r\nkeys\r\n$4720\r\ndasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddasdadasdasdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
-//    test_parser("*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musis\r\n*3\r\n$4\r\ntegh\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n*3\r\n$4\r\ntttt\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n");
-//    test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
-//    test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
-//    test_parser("\r\nss\rn\rnss*ssss*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
-//    test_parser("\r\nss\rn\rnss*ssss*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$1\r\n$4\r\n234");
+    test_parser("kolon*****\r\n$5aoklo*3\r\n$4\r\nhget\r\n$7\r\nprofile\r\n$10\r\nakul.musis\r\n*3\r\n$4\r\ntegh\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n*3\r\n$4\r\ntttt\r\n$7\r\nprofile\r\n$10\r\nluka.musin\r\n");
+    test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
+    test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n");
+    test_parser("*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeys\r\n$1\r\n*\r\n*2\r\n$4\r\nkeyl\r\n");
+
+
+    test_parser("*2\r\n$4\r\nkeys");
+
+
+
+
+
 }
